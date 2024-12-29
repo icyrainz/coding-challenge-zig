@@ -17,6 +17,9 @@ const WcResult = struct {
     count_chars: ?usize = null,
 };
 
+/// This implementation reads the entire input file in memory and perform single pass to get
+/// the count (two passes if character count is required).
+/// TODO: Add streaming capability for input file larger than available memory.
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
