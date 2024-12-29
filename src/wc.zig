@@ -11,10 +11,10 @@ const WcFlags = struct {
 };
 
 const WcResult = struct {
-    count_bytes: ?usize = undefined,
-    count_lines: ?usize = undefined,
-    count_words: ?usize = undefined,
-    count_chars: ?usize = undefined,
+    count_bytes: ?usize = null,
+    count_lines: ?usize = null,
+    count_words: ?usize = null,
+    count_chars: ?usize = null,
 };
 
 pub fn main() !void {
@@ -51,14 +51,9 @@ pub fn main() !void {
 
     var wc_flags: WcFlags = .{};
 
-    if (res.args.c != 0)
-        wc_flags.count_bytes = true;
-
-    if (res.args.l != 0)
-        wc_flags.count_lines = true;
-
-    if (res.args.w != 0)
-        wc_flags.count_words = true;
+    if (res.args.c != 0) wc_flags.count_bytes = true;
+    if (res.args.l != 0) wc_flags.count_lines = true;
+    if (res.args.w != 0) wc_flags.count_words = true;
 
     for (res.positionals[0]) |pos| {
         file_path = pos;
@@ -84,9 +79,12 @@ pub fn main() !void {
 }
 
 fn openFile(file_path: []const u8, allocator: std.mem.Allocator) ![]const u8 {
-    const file = try std.fs.cwd().openFile(file_path, .{});
+    const file = std.fs.cwd().openFile(file_path, .{}) catch |err| {
+        std.debug.print("Error opening file: {s}", .{file_path});
+        return err;
+    };
     const file_content_bytes = try file.readToEndAlloc(allocator, std.math.maxInt(usize));
-    file.close();
+    defer file.close();
 
     return file_content_bytes;
 }
@@ -94,23 +92,12 @@ fn openFile(file_path: []const u8, allocator: std.mem.Allocator) ![]const u8 {
 fn count(file_content_bytes: []const u8, wc_flags: WcFlags) WcResult {
     const LINE_BREAK = '\n';
     var wc_result: WcResult = .{};
-
-    if (wc_flags.count_bytes) {
-        wc_result.count_bytes = file_content_bytes.len;
-    }
-
-    if (wc_flags.count_lines) {
-        wc_result.count_lines = 0;
-    }
-
-    if (wc_flags.count_words) {
-        wc_result.count_words = 0;
-    }
     var is_in_word = false;
 
-    if (wc_flags.count_chars) {
-        wc_result.count_chars = 0;
-    }
+    if (wc_flags.count_bytes) wc_result.count_bytes = file_content_bytes.len;
+    if (wc_flags.count_lines) wc_result.count_lines = 0;
+    if (wc_flags.count_words) wc_result.count_words = 0;
+    if (wc_flags.count_chars) wc_result.count_chars = 0;
 
     for (file_content_bytes) |byte| {
         if (wc_flags.count_lines) {
