@@ -99,6 +99,8 @@ fn count(file_content_bytes: []const u8, wc_flags: WcFlags) WcResult {
     if (wc_flags.count_words) wc_result.count_words = 0;
     if (wc_flags.count_chars) wc_result.count_chars = 0;
 
+    // First pass: count bytes, lines, and words
+    // This is done in a single iteration for efficiency
     for (file_content_bytes) |byte| {
         if (wc_flags.count_lines) {
             wc_result.count_lines.? += if (byte == LINE_BREAK) 1 else 0;
@@ -123,6 +125,8 @@ fn count(file_content_bytes: []const u8, wc_flags: WcFlags) WcResult {
         wc_result.count_words.? += 1;
     }
 
+    // Second pass: only for character counting
+    // This needs separate UTF-8 aware iteration
     if (wc_flags.count_chars) {
         var utf8_iter = std.unicode.Utf8View.initUnchecked(file_content_bytes).iterator();
         wc_result.count_chars = 0;
@@ -139,21 +143,10 @@ fn printResult(wc_result: WcResult, allocator: std.mem.Allocator) ![]const u8 {
     var values = std.ArrayList(usize).init(allocator);
     defer _ = values.deinit();
 
-    if (wc_result.count_bytes) |c| {
-        try values.append(c);
-    }
-
-    if (wc_result.count_lines) |l| {
-        try values.append(l);
-    }
-
-    if (wc_result.count_words) |w| {
-        try values.append(w);
-    }
-
-    if (wc_result.count_chars) |m| {
-        try values.append(m);
-    }
+    if (wc_result.count_bytes) |c| try values.append(c);
+    if (wc_result.count_lines) |l| try values.append(l);
+    if (wc_result.count_words) |w| try values.append(w);
+    if (wc_result.count_chars) |m| try values.append(m);
 
     var print_result = std.ArrayList(u8).init(allocator);
     const writer = print_result.writer();
