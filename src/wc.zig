@@ -18,10 +18,9 @@ const WcResult = struct {
 };
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-
-    const allocator = gpa.allocator();
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
 
     const params = comptime clap.parseParamsComptime(
         \\-h, --help             Display this help and exit.
@@ -35,7 +34,7 @@ pub fn main() !void {
     var diag = clap.Diagnostic{};
     var res = clap.parse(clap.Help, &params, clap.parsers.default, .{
         .diagnostic = &diag,
-        .allocator = gpa.allocator(),
+        .allocator = allocator,
     }) catch |err| {
         // Report useful error and exit.
         diag.report(std.io.getStdErr().writer(), err) catch {};
@@ -70,11 +69,9 @@ pub fn main() !void {
     }
 
     const content: []const u8 = try readFileContent(file_path, allocator);
-    defer _ = allocator.free(content);
 
     const wc_result = count(content, wc_flags);
     const print_wc_result = try printResult(wc_result, allocator);
-    defer _ = allocator.free(print_wc_result);
 
     try stdout.print("{s}\t{s}\n", .{ print_wc_result, file_path orelse "stdin" });
 }
