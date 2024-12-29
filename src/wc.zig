@@ -43,7 +43,7 @@ pub fn main() !void {
     };
     defer res.deinit();
 
-    var file_path: []const u8 = undefined;
+    var file_path: ?[]const u8 = null;
     if (res.args.help != 0) {
         std.debug.print("--help\n", .{});
         return;
@@ -69,13 +69,14 @@ pub fn main() !void {
         wc_flags.count_words = true;
     }
 
-    const file_content = try openFile(file_path, allocator);
-    defer _ = allocator.free(file_content);
-    const wc_result = count(file_content, wc_flags);
+    const content: []const u8 = try readFileContent(file_path, allocator);
+    defer _ = allocator.free(content);
+
+    const wc_result = count(content, wc_flags);
     const print_wc_result = try printResult(wc_result, allocator);
     defer _ = allocator.free(print_wc_result);
 
-    try stdout.print("{s}\t{s}\n", .{ print_wc_result, file_path });
+    try stdout.print("{s}\t{s}\n", .{ print_wc_result, file_path orelse "stdin" });
 }
 
 /// Opens and reads the entire content of a file at the given path.
@@ -83,19 +84,24 @@ pub fn main() !void {
 /// and must be freed by the caller.
 ///
 /// Arguments:
-///   file_path: Path to the file to read
+///   file_path: Optional path to the file to read. If null, stdin will be used.
 ///   allocator: Memory allocator to use
 ///
 /// Returns: The file contents as a byte slice
-fn openFile(file_path: []const u8, allocator: std.mem.Allocator) ![]const u8 {
-    const file = std.fs.cwd().openFile(file_path, .{}) catch |err| {
-        std.debug.print("Error opening file: {s}", .{file_path});
-        return err;
-    };
-    const file_content_bytes = try file.readToEndAlloc(allocator, std.math.maxInt(usize));
-    defer file.close();
+fn readFileContent(file_path: ?[]const u8, allocator: std.mem.Allocator) ![]const u8 {
+    var content: []const u8 = undefined;
+    if (file_path) |path| {
+        const file = std.fs.cwd().openFile(path, .{}) catch |err| {
+            std.debug.print("Error opening file: {s}", .{path});
+            return err;
+        };
+        content = try file.readToEndAlloc(allocator, std.math.maxInt(usize));
+        defer file.close();
+    } else {
+        content = try std.io.getStdIn().readToEndAlloc(allocator, std.math.maxInt(usize));
+    }
 
-    return file_content_bytes;
+    return content;
 }
 
 /// Counts various metrics (bytes, lines, words, characters) in the given content
