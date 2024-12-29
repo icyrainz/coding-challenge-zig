@@ -78,6 +78,15 @@ pub fn main() !void {
     try stdout.print("{s}\t{s}\n", .{ print_wc_result, file_path });
 }
 
+/// Opens and reads the entire content of a file at the given path.
+/// Memory for the file content is allocated using the provided allocator
+/// and must be freed by the caller.
+///
+/// Arguments:
+///   file_path: Path to the file to read
+///   allocator: Memory allocator to use
+///
+/// Returns: The file contents as a byte slice
 fn openFile(file_path: []const u8, allocator: std.mem.Allocator) ![]const u8 {
     const file = std.fs.cwd().openFile(file_path, .{}) catch |err| {
         std.debug.print("Error opening file: {s}", .{file_path});
@@ -89,6 +98,17 @@ fn openFile(file_path: []const u8, allocator: std.mem.Allocator) ![]const u8 {
     return file_content_bytes;
 }
 
+/// Counts various metrics (bytes, lines, words, characters) in the given content
+/// based on the specified flags.
+///
+/// Arguments:
+///   file_content_bytes: Content to analyze as a byte slice
+///   wc_flags: Struct specifying which metrics to count
+///
+/// Notes:
+///   - Uses a single pass for bytes, lines, and words counting
+///   - Uses a separate pass for UTF-8 character counting when -m is specified
+///   - Words are delimited by spaces, tabs, and newlines
 fn count(file_content_bytes: []const u8, wc_flags: WcFlags) WcResult {
     const LINE_BREAK = '\n';
     var wc_result: WcResult = .{};
@@ -139,6 +159,14 @@ fn count(file_content_bytes: []const u8, wc_flags: WcFlags) WcResult {
     return wc_result;
 }
 
+/// Formats the counting results into a string suitable for output.
+/// Results are tab-separated and only includes metrics that were counted.
+///
+/// Arguments:
+///   wc_result: The counting results to format
+///   allocator: Memory allocator to use
+///
+/// Returns: A newly allocated string that must be freed by the caller
 fn printResult(wc_result: WcResult, allocator: std.mem.Allocator) ![]const u8 {
     var values = std.ArrayList(usize).init(allocator);
     defer _ = values.deinit();
@@ -159,11 +187,147 @@ fn printResult(wc_result: WcResult, allocator: std.mem.Allocator) ![]const u8 {
     return print_result.toOwnedSlice();
 }
 
-test "count words" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
+test "byte counting" {
+    const TestCase = struct {
+        input: []const u8,
+        expected: usize,
+    };
 
-    const test_data = "abc 123\t567\nxyz";
-    const wc_result = count(test_data, .{ .count_words = true });
-    try std.testing.expectEqual(4, wc_result.count_words);
+    const test_cases = [_]TestCase{
+        .{ .input = "", .expected = 0 },
+        .{ .input = "hello", .expected = 5 },
+        .{ .input = "hello\n", .expected = 6 },
+        .{ .input = "héllo", .expected = 6 }, // é is 2 bytes in UTF-8
+        .{ .input = "👋", .expected = 4 }, // emoji is 4 bytes
+    };
+
+    for (test_cases) |tc| {
+        const result = count(tc.input, .{ .count_bytes = true });
+        try std.testing.expectEqual(@as(?usize, tc.expected), result.count_bytes);
+    }
+}
+
+test "line counting" {
+    const TestCase = struct {
+        input: []const u8,
+        expected: usize,
+    };
+
+    const test_cases = [_]TestCase{
+        .{ .input = "", .expected = 0 },
+        .{ .input = "hello", .expected = 0 },
+        .{ .input = "hello\n", .expected = 1 },
+        .{ .input = "hello\nworld", .expected = 1 },
+        .{ .input = "hello\nworld\n", .expected = 2 },
+        .{ .input = "\n\n\n", .expected = 3 },
+        .{ .input = "héllo\n世界\n", .expected = 2 },
+    };
+
+    for (test_cases) |tc| {
+        const result = count(tc.input, .{ .count_lines = true });
+        try std.testing.expectEqual(@as(?usize, tc.expected), result.count_lines);
+    }
+}
+
+test "word counting" {
+    const TestCase = struct {
+        input: []const u8,
+        expected: usize,
+    };
+
+    const test_cases = [_]TestCase{
+        .{ .input = "", .expected = 0 },
+        .{ .input = "hello", .expected = 1 },
+        .{ .input = "hello world", .expected = 2 },
+        .{ .input = "hello  world", .expected = 2 }, // multiple spaces
+        .{ .input = "hello\tworld", .expected = 2 }, // tab
+        .{ .input = "hello\nworld", .expected = 2 }, // newline
+        .{ .input = "hello\r\nworld", .expected = 2 }, // CRLF
+        .{ .input = "  hello  world  ", .expected = 2 }, // leading/trailing spaces
+        .{ .input = "héllo 世界", .expected = 2 }, // unicode
+    };
+
+    for (test_cases) |tc| {
+        const result = count(tc.input, .{ .count_words = true });
+        try std.testing.expectEqual(@as(?usize, tc.expected), result.count_words);
+    }
+}
+
+test "character counting" {
+    const TestCase = struct {
+        input: []const u8,
+        expected: usize,
+    };
+
+    const test_cases = [_]TestCase{
+        .{ .input = "", .expected = 0 },
+        .{ .input = "hello", .expected = 5 },
+        .{ .input = "héllo", .expected = 5 }, // é is one character
+        .{ .input = "👋hello", .expected = 6 }, // emoji is one character
+        .{ .input = "世界", .expected = 2 }, // two Chinese characters
+        .{ .input = "café", .expected = 4 }, // accented character
+        .{ .input = "🏳️‍🌈", .expected = 4 }, // complex emoji (rainbow flag)
+    };
+
+    for (test_cases) |tc| {
+        const result = count(tc.input, .{ .count_chars = true });
+        try std.testing.expectEqual(@as(?usize, tc.expected), result.count_chars);
+    }
+}
+
+test "multiple flags" {
+    const test_input = "hello\nworld\n你好\n";
+
+    // Test all flags together
+    {
+        const result = count(test_input, .{
+            .count_bytes = true,
+            .count_lines = true,
+            .count_words = true,
+            .count_chars = true,
+        });
+        try std.testing.expectEqual(@as(?usize, 19), result.count_bytes);
+        try std.testing.expectEqual(@as(?usize, 3), result.count_lines);
+        try std.testing.expectEqual(@as(?usize, 3), result.count_words);
+        try std.testing.expectEqual(@as(?usize, 15), result.count_chars);
+    }
+
+    // Test different combinations
+    {
+        const result = count(test_input, .{ .count_bytes = true, .count_lines = true });
+        try std.testing.expectEqual(@as(?usize, 19), result.count_bytes);
+        try std.testing.expectEqual(@as(?usize, 3), result.count_lines);
+        try std.testing.expectEqual(@as(?usize, null), result.count_words);
+        try std.testing.expectEqual(@as(?usize, null), result.count_chars);
+    }
+}
+
+test "print result formatting" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    // Test single flag
+    {
+        const result = WcResult{
+            .count_bytes = 42,
+            .count_lines = null,
+            .count_words = null,
+            .count_chars = null,
+        };
+        const output = try printResult(result, allocator);
+        try std.testing.expectEqualStrings("42", output);
+    }
+
+    // Test multiple flags
+    {
+        const result = WcResult{
+            .count_bytes = 42,
+            .count_lines = 5,
+            .count_words = 10,
+            .count_chars = null,
+        };
+        const output = try printResult(result, allocator);
+        try std.testing.expectEqualStrings("42\t5\t10", output);
+    }
 }
